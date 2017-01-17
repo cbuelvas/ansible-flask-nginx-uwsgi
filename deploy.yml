@@ -1,0 +1,63 @@
+---
+- hosts: web
+  vars_files:
+    - vars.yml
+  gather_facts: false
+  become: yes
+
+
+  tasks:
+    - name: Install Firewall ufw
+      apt: name=ufw update-cache=yes
+
+    - name: Allow ssh through firewall
+      ufw: proto=tcp port=22 rule=allow
+
+    - name: Set ufw policy
+      ufw: state=enabled direction=incoming policy=deny
+
+    - name: Allow nginx firewall
+      ufw: proto=tcp port=80 rule=allow
+
+    - name: Allow nginx ssl firewall
+      ufw: proto=tcp port=443 rule=allow
+
+    - name: Copy Database from local
+      copy: src=files/db_test2017.sql dest=/tmp/{{ project_name }}.sql
+
+    - name: Create Database on server
+      mysql_db: name=test2017 state=present login_user='root' login_password={{MySQL_root_pass}}
+
+    - name: Import Database for the proyect
+      mysql_db: db=test2017 state=import login_password="{{ MySQL_root_pass }}" login_user=root target=/tmp/test2017.sql
+   
+    - name: Create directory for app
+      file: path={{ install_root }}/{{ project_name }} state=directory
+
+    - name: Clone/pull project repo
+      git: repo={{ project_repo }} dest={{ install_root }}/{{ project_name }}
+
+    - name: install python packages
+      pip: requirements={{ install_root }}/{{ project_name }}/requirements.txt virtualenv={{ install_root }}/venv
+
+    - name: copy nginx config
+      template: src=files/nginx.conf dest=/etc/nginx/conf.d/default.conf
+      notify:
+      - restart nginx
+
+    - name: Change gunicorn script chmod to 0755
+      file: path={{ install_root }}/{{ project_name }}/gunicorn.sh mode=0755
+
+    - name: Copy gunicorn config file
+      copy: src=files/gunicorn.conf dest=/etc/init/gunicorn.conf
+
+    - name: Restart Gunicorn service
+      service: name=gunicorn state=restarted enabled=yes
+
+    - name: make sure nginx server is running
+      service: name=nginx state=started enabled=yes
+
+  handlers: 
+    - name: restart nginx
+      service: name=nginx state=restarted
+
